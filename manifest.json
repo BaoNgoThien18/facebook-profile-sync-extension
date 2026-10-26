@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Profile + Page Sync",
+  "version": "1.5.8",
+  "description": "Đồng bộ profile Facebook cá nhân và các Page bạn quản lý khi bạn nhấn nút.",
+  "permissions": ["cookies", "storage", "tabs", "declarativeNetRequest"],
+  "host_permissions": [
+    "https://*.facebook.com/*",
+    "https://facebook.buglab.vn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Facebook Profile + Page Sync",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.facebook.com/*"],
+      "js": ["modules/facebook/profile-context.js", "modules/facebook/insights-metrics.js", "modules/facebook/page-assets.js", "modules/ui/status-toast.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
