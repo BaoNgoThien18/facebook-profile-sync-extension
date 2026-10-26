@@ -75,23 +75,17 @@
 
   async function refresh() {
     if (!chrome?.storage?.local) return;
-    let [data, facebookTabs] = await Promise.all([
-      chrome.storage.local.get([KEY_PAGES, KEY_PROFILE, KEY_SUCCESS, KEY_STATUS, KEY_SYNC_MODE]),
-      getOpenFacebookTabs(),
-    ]);
-    if (data[KEY_SYNC_MODE] !== 1) {
-      await chrome.storage.local.set({
-        [KEY_SYNC_MODE]: 1,
-        [KEY_STATUS]: { state: "ready", message: "Sẵn sàng đồng bộ thủ công.", checkedAt: Date.now() },
-      });
-      data = await chrome.storage.local.get([KEY_PAGES, KEY_PROFILE, KEY_SUCCESS, KEY_STATUS]);
-    }
-    const profile = data[KEY_PROFILE];
-    const syncStatus = data[KEY_STATUS];
-    const pagesByProfile = data[KEY_PAGES] || {};
-    const pages = profile?.id ? pagesByProfile[profile.id] || [] : [];
-    const lastSync = profile?.id ? Number((data[KEY_SUCCESS] || {})[profile.id] || 0) : 0;
-    const hasFacebookTab = facebookTabs.length > 0;
+    try {
+      const [data, facebookTabs] = await Promise.all([
+        chrome.storage.local.get([KEY_PAGES, KEY_PROFILE, KEY_SUCCESS, KEY_STATUS]),
+        getOpenFacebookTabs(),
+      ]);
+      const profile = data[KEY_PROFILE];
+      const syncStatus = data[KEY_STATUS];
+      const pagesByProfile = data[KEY_PAGES] || {};
+      const pages = profile?.id ? pagesByProfile[profile.id] || [] : [];
+      const lastSync = profile?.id ? Number((data[KEY_SUCCESS] || {})[profile.id] || 0) : 0;
+      const hasFacebookTab = facebookTabs.length > 0;
 
     $("#profile-name").textContent = profile?.name || "Chưa đồng bộ profile";
     $("#profile-id").textContent = profile?.id
@@ -131,6 +125,9 @@
     $("#sync-status").title = syncStatus?.checkedAt
       ? `Lần kiểm tra: ${new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium" }).format(new Date(syncStatus.checkedAt))}`
       : "";
+    } catch (err) {
+      console.error("Dashboard refresh error:", err);
+    }
   }
 
 

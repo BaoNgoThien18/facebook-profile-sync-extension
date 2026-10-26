@@ -158,8 +158,22 @@ async function runManualSync() {
     : "Đã đồng bộ profile; Facebook hiện không có Page đang hoạt động để đồng bộ.";
 
   if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
-    const saved = await chrome.storage.local.get("profile_page_sync_last_success");
+    const saved = await chrome.storage.local.get(["profile_page_sync_last_success", "profile_page_sync_pages"]);
     await chrome.storage.local.set({
+      profile_page_sync_profile: {
+        id: realProfileId,
+        name: realName,
+        avatar: account?.avatar || `https://graph.facebook.com/${realProfileId}/picture?height=100`,
+        profileUrl: `https://facebook.com/${realProfileId}`,
+      },
+      profile_page_sync_pages: {
+        ...(saved?.profile_page_sync_pages || {}),
+        [realProfileId]: pages.map(p => ({
+          id: String(p.id || p.pageId),
+          name: String(p.name || "Facebook Page"),
+          avatar: String(p.avatar || ""),
+        })),
+      },
       profile_page_sync_last_success: {
         ...(saved?.profile_page_sync_last_success || {}),
         [realProfileId]: syncedAt,
