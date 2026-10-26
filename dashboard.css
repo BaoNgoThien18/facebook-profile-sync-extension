@@ -12,7 +12,16 @@
   --line: #f0e5e8;
   --green: #238b68;
 }
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+*::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
 [hidden] { display: none !important; }
 body { margin: 0; min-width: 700px; min-height: 100vh; background: #fffafb; }
 button { font-family: inherit; }
