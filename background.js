@@ -1,5 +1,6 @@
 importScripts(
   "modules/facebook/facebook-api.js",
+  "modules/facebook/business-insights-api.js",
   "modules/server/sync-api.js",
   "modules/sync/sync-service.js",
 );
@@ -41,14 +42,16 @@ async function setupDNRRules() {
           condition: {
             urlFilter: "||business.facebook.com/api/graphql*",
             resourceTypes: ["xmlhttprequest", "other"],
-            initiatorDomains: [chrome.runtime?.id || "chrome-extension"],
           },
           action: {
             type: "modifyHeaders",
             requestHeaders: [
               { header: "Origin", operation: "set", value: "https://business.facebook.com" },
-              { header: "Referer", operation: "set", value: "https://business.facebook.com/latest" },
+              { header: "Referer", operation: "set", value: "https://business.facebook.com/latest/posts/published_posts/" },
               { header: "Sec-Fetch-Site", operation: "set", value: "same-origin" },
+              { header: "Sec-Fetch-Mode", operation: "set", value: "cors" },
+              { header: "Sec-Fetch-Dest", operation: "set", value: "empty" },
+              { header: "X-ASBD-ID", operation: "set", value: "359341" },
             ],
           },
         },
@@ -77,6 +80,16 @@ async function setSyncStatus(state, message, details = {}) {
 }
 
 async function runManualSync() {
+  // Bắt buộc phải có token nhân viên mới cho sử dụng
+  let employeeToken = "";
+  if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
+    const tokenData = await chrome.storage.local.get("buglab_user_api_token");
+    employeeToken = (tokenData?.buglab_user_api_token || "").trim();
+  }
+  if (!employeeToken) {
+    throw new Error("Vui lòng nhập API Token nhân viên trong Cài đặt trước khi sử dụng tool.");
+  }
+
   const cookies = (typeof chrome !== "undefined" && chrome.cookies?.getAll)
     ? await chrome.cookies.getAll({ domain: "facebook.com" })
     : [];
@@ -101,6 +114,27 @@ async function runManualSync() {
         dtsg: account.dtsg,
         userId: realUid,
       });
+
+      // Lấy view và số lượng video 7 ngày qua cho từng page nếu có token
+      if (typeof FacebookBusinessInsightsApi !== "undefined" && FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews && account.dtsg) {
+        await setSyncStatus("checking", `Đang lấy video và views 7 ngày qua cho ${pages.length} Page...`, { profileId: realUid });
+        for (const page of pages) {
+          const pageId = page.id || page.pageId;
+          if (!pageId) continue;
+          try {
+            const stats = await FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews(pageId, {
+              fb_dtsg: account.dtsg,
+              lsd: account.lsd || "cB4dmWcFc9EdW3lIItBEZs",
+            });
+            if (stats?.hasData || Number.isSafeInteger(stats?.views_7d)) {
+              page.views_7d = stats.views_7d || 0;
+              page.video_count_7d = stats.video_count_7d || 0;
+            }
+          } catch (statErr) {
+            console.warn(`[Background] Không lấy được stats video 7d cho page ${pageId}:`, statErr);
+          }
+        }
+      }
     } catch (apiError) {
       console.warn("[Background] FacebookAPI trực tiếp gặp lỗi, thử fallback qua Tab:", apiError);
     }
@@ -135,7 +169,18 @@ async function runManualSync() {
   const realProfileId = account?.cUserId || account?.userId || profileId;
   const realName = account?.name && account.name !== "Facebook User" ? account.name : `Facebook User ${realProfileId}`;
 
-  await setSyncStatus("checking", "Đang lưu dữ liệu Profile và Page lên hệ thống BugLab...", {
+  // Kiểm tra cài đặt đồng bộ server
+  let isServerSyncOn = true;
+  if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
+    const config = await chrome.storage.local.get("buglab_server_sync_enabled");
+    isServerSyncOn = config?.buglab_server_sync_enabled !== false;
+  }
+
+  const statusMsg = isServerSyncOn
+    ? "Đang lưu dữ liệu Profile và Page lên hệ thống BugLab..."
+    : "Đang lưu dữ liệu Profile và Page trên Dashboard (Server sync: Tắt)...";
+
+  await setSyncStatus("checking", statusMsg, {
     profileId: realProfileId,
     pageCount: pages.length,
   });
@@ -148,14 +193,17 @@ async function runManualSync() {
   }, pages, { allowFanpageMode: true });
 
   if (!syncResult?.success) {
-    throw new Error(syncResult?.error || "Đồng bộ Facebook lên hệ thống thất bại.");
+    throw new Error(syncResult?.error || "Đồng bộ Facebook thất bại.");
   }
 
   const syncedAt = Date.now();
   const pageCount = Number(syncResult.pageCount ?? pages.length) || 0;
-  const syncMessage = pageCount > 0
+  let syncMessage = pageCount > 0
     ? `Đã đồng bộ profile và ${pageCount} Page.`
     : "Đã đồng bộ profile; Facebook hiện không có Page đang hoạt động để đồng bộ.";
+  if (!isServerSyncOn) {
+    syncMessage += " (Chế độ chỉ hiển thị Dashboard)";
+  }
 
   if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
     const saved = await chrome.storage.local.get(["profile_page_sync_last_success", "profile_page_sync_pages"]);
@@ -172,6 +220,8 @@ async function runManualSync() {
           id: String(p.id || p.pageId),
           name: String(p.name || "Facebook Page"),
           avatar: String(p.avatar || ""),
+          views_7d: p.views_7d ?? null,
+          video_count_7d: p.video_count_7d ?? null,
         })),
       },
       profile_page_sync_last_success: {
@@ -192,6 +242,7 @@ async function runManualSync() {
 }
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  // Thay đổi: Không tự động mở dashboard khi click action icon nữa, chỉ kích hoạt đồng bộ hoặc mở popup
   chrome.action?.onClicked?.addListener(() => {
     chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
   });
@@ -210,6 +261,11 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
       ProfilePageSync.syncPageList(message.profile, message.pages)
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: error?.message || "Server không nhận dữ liệu Facebook." }));
+      return true;
+    }
+    if (message?.action === "OPEN_DASHBOARD") {
+      chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+      sendResponse({ success: true });
       return true;
     }
     if (message?.action !== "MANUAL_SYNC") return false;

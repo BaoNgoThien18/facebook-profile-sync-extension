@@ -67,6 +67,7 @@
 
       // Các trang duyệt để lấy DTSG token và Tên người dùng thật
       const targetUrls = [
+        "https://business.facebook.com/latest/home",
         "https://www.facebook.com/?_rdr",
         "https://www.facebook.com/me",
         "https://mbasic.facebook.com/profile.php",

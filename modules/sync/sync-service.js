@@ -15,6 +15,16 @@
     return profileId;
   }
 
+  async function isServerSyncEnabled() {
+    if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
+      try {
+        const data = await chrome.storage.local.get("buglab_server_sync_enabled");
+        return data?.buglab_server_sync_enabled !== false;
+      } catch (_) {}
+    }
+    return true;
+  }
+
   async function syncPageList(profile, pages, dependencies = {}) {
     const getCookies = dependencies.getCookies || (() => chrome.cookies.getAll({ domain: "facebook.com" }));
     const profileId = await validateProfileSession(profile, getCookies, { allowFanpageMode: !!dependencies.allowFanpageMode });
@@ -28,20 +38,36 @@
     const safePages = pages.map(page => ({ ...page, id: page.id || page.pageId }))
       .filter(page => /^[1-9]\d{0,31}$/.test(String(page.id)) && String(page.id) !== profileId);
 
-    await syncProfile({
-      fb_uid: profileId,
-      name: profileName,
-      avatar_url: profile?.avatar || undefined,
-      profile_status: "Live",
-    });
-    await syncPages(safePages.map(page => ({
-      page_uid: String(page.id),
-      name: String(page.name || `Page ${page.id}`).trim(),
-      ...(page.avatar ? { avatar_url: String(page.avatar) } : {}),
-      fb_profile_uid: profileId,
-      page_status: "Hoạt động",
-      page_url: `https://facebook.com/${page.id}`,
-    })));
+    const serverSyncActive = dependencies.enableServerSync !== undefined
+      ? Boolean(dependencies.enableServerSync)
+      : await isServerSyncEnabled();
+
+    if (serverSyncActive) {
+      if (typeof dependencies.getUserApiToken === "function") {
+        const token = await dependencies.getUserApiToken();
+        if (!token) throw new Error("Vui lòng nhập API Token nhân viên trong Cài đặt trước khi sử dụng tool.");
+      } else if (typeof FacebookSyncApi !== "undefined" && FacebookSyncApi.getUserApiToken) {
+        const token = await FacebookSyncApi.getUserApiToken();
+        if (!token) throw new Error("Vui lòng nhập API Token nhân viên trong Cài đặt trước khi sử dụng tool.");
+      }
+
+      await syncProfile({
+        fb_uid: profileId,
+        name: profileName,
+        avatar_url: profile?.avatar || undefined,
+        profile_status: "Live",
+      });
+      await syncPages(safePages.map(page => ({
+        page_uid: String(page.id),
+        name: String(page.name || `Page ${page.id}`).trim(),
+        ...(page.avatar ? { avatar_url: String(page.avatar) } : {}),
+        fb_profile_uid: profileId,
+        page_status: "Hoạt động",
+        page_url: `https://facebook.com/${page.id}`,
+        ...(Number.isSafeInteger(page.views_7d) ? { views_7d: page.views_7d } : {}),
+        ...(Number.isSafeInteger(page.video_count_7d) ? { video_count_7d: page.video_count_7d, videos_7d: page.video_count_7d } : {}),
+      })));
+    }
 
     if (typeof chrome !== "undefined" && chrome.storage?.local?.set) {
       const saved = await chrome.storage.local.get(PAGE_CACHE_KEY);
@@ -51,6 +77,8 @@
           id: String(page.id),
           name: String(page.name || "").trim(),
           ...(page.avatar ? { avatar: String(page.avatar) } : {}),
+          ...(Number.isSafeInteger(page.views_7d) ? { views_7d: page.views_7d } : {}),
+          ...(Number.isSafeInteger(page.video_count_7d) ? { video_count_7d: page.video_count_7d } : {}),
         })),
       }, profile_page_sync_profile: {
         id: profileId,

@@ -149,6 +149,7 @@ test('syncs profile and Page records from the request-only managed Page list', a
   const result = await ProfilePageSync.syncPageList({
     profileId: '100', name: 'Profile A', avatar: 'https://img.test/profile.png',
   }, [{ pageId: '200', name: 'Page A', avatar: 'https://img.test/page.png' }], {
+    getUserApiToken: async () => 'test_token_123',
     getCookies: async () => [{ name: 'c_user', value: '100' }, { name: 'i_user', value: '0' }],
     syncProfile: async profile => { calls.push({ kind: 'profile', profile }); },
     syncPages: async pages => { calls.push({ kind: 'pages', pages }); },
@@ -159,11 +160,26 @@ test('syncs profile and Page records from the request-only managed Page list', a
   assert.equal(calls[1].pages[0].avatar_url, 'https://img.test/page.png');
 });
 
+test('skips server sync when enableServerSync is false but succeeds locally', async () => {
+  const calls = [];
+  const result = await ProfilePageSync.syncPageList({
+    profileId: '100', name: 'Profile A', avatar: 'https://img.test/profile.png',
+  }, [{ pageId: '200', name: 'Page A' }], {
+    getCookies: async () => [{ name: 'c_user', value: '100' }, { name: 'i_user', value: '0' }],
+    syncProfile: async profile => { calls.push({ kind: 'profile', profile }); },
+    syncPages: async pages => { calls.push({ kind: 'pages', pages }); },
+    enableServerSync: false,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { success: true, profileId: '100', pageCount: 1 });
+  assert.equal(calls.length, 0); // Không gọi syncProfile và syncPages lên server
+});
+
 test('syncs the profile when Facebook has no active managed Pages', async () => {
   const calls = [];
   const result = await ProfilePageSync.syncPageList({
     profileId: '100', name: 'Profile A', avatar: 'https://img.test/profile.png',
   }, [], {
+    getUserApiToken: async () => 'test_token_123',
     getCookies: async () => [{ name: 'c_user', value: '100' }, { name: 'i_user', value: '0' }],
     syncProfile: async profile => { calls.push({ kind: 'profile', profile }); },
     syncPages: async pages => { calls.push({ kind: 'pages', pages }); },
@@ -298,6 +314,60 @@ test('requests the actual seven-day Insights GraphQL query and sums its daily po
   assert.deepEqual(JSON.parse(JSON.stringify(result)), { views_7d: 7 });
 });
 
+test('FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews extracts video count and total views for last 7d', async () => {
+  let request;
+  const fakeApiResponse = 'for (;;);' + JSON.stringify({
+    data: {
+      bizweb_unified_table: {
+        edges: [
+          {
+            node: {
+              id: "v1",
+              video_status: "PUBLISHED",
+              metrics: { VIEWS: 1250, REACH: 3000 }
+            }
+          },
+          {
+            node: {
+              id: "v2",
+              content_type: "REELS_VIDEO",
+              views: 3500
+            }
+          },
+          {
+            node: {
+              id: "post3",
+              video_status: null,
+              content_type: "IMAGE",
+              metrics: { VIEWS: 0 }
+            }
+          }
+        ]
+      }
+    }
+  });
+
+  const result = await FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews('649510394916531', {
+    fb_dtsg: 'test-dtsg', lsd: 'test-lsd',
+  }, async (url, options) => {
+    request = { url, options };
+    return { ok: true, text: async () => fakeApiResponse };
+  });
+
+  assert.equal(request.url, 'https://business.facebook.com/api/graphql/');
+  const body = new URLSearchParams(request.options.body);
+  assert.equal(body.get('doc_id'), '27989945277348632');
+  assert.equal(body.get('fb_api_req_friendly_name'), 'useBizWebUnifiedTableInitialLoad_data_refetchable');
+  assert.equal(body.get('av'), '649510394916531');
+
+  const vars = JSON.parse(body.get('variables'));
+  assert.deepEqual(vars.ids, ['649510394916531']);
+  assert.equal(vars.timeRange.type, 'LAST_7D');
+
+  assert.equal(result.video_count_7d, 2);
+  assert.equal(result.views_7d, 4750);
+});
+
 test('uploads metrics only to the cached managed Page for the active personal profile', async () => {
   let uploaded;
   const result = await ProfilePageSync.syncMetrics('Page A', { follow_count: 128, views_7d: 17 }, {
@@ -411,3 +481,20 @@ test('FacebookAPI.getUserPages falls back to Strategy 3 (mbasic HTML Scraping)',
   assert.equal(pages[1].name, 'Phu Kien Dien Thoai');
 });
 
+
+test('FacebookBusinessInsightsApi parses actual request/contents response correctly', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const filePath = path.resolve(__dirname, '../request/contents');
+  if (!fs.existsSync(filePath)) return;
+  const content = fs.readFileSync(filePath, 'utf8');
+  const startJson = content.indexOf('{"data":');
+  if (startJson === -1) return;
+  const jsonStr = content.slice(startJson).trim().split('\n')[0];
+  const parsed = JSON.parse(jsonStr);
+
+  const result = FacebookBusinessInsightsApi.parseWeeklyVideosAndViews([parsed]);
+  assert.equal(result.hasData, true);
+  assert.equal(result.video_count_7d, 11);
+  assert.equal(result.views_7d, 465);
+});
