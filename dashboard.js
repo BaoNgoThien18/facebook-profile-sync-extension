@@ -299,7 +299,7 @@
     } else {
       // Fallback kiểm tra trực tiếp
       try {
-        const resp = await fetch("https://facebook.buglab.vn/api/v1/profiles?limit=1", {
+        const resp = await fetch("https://facebook.buglogin.com/api/v1/profiles?limit=1", {
           headers: { Accept: "application/json", "X-API-Key": token, Authorization: `Bearer ${token}` },
         });
         const d = await resp.json().catch(() => null);

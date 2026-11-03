@@ -1,5 +1,5 @@
 (() => {
-  const API_BASE = "https://facebook.buglab.vn/api/v1";
+  const API_BASE = "https://facebook.buglogin.com/api/v1";
 
   async function getUserApiToken() {
     if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {

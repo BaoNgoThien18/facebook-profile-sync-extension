@@ -1,6 +1,6 @@
 # BugLab Facebook Profile & Page Sync Extension
 
-Extension Chrome (Manifest V3) chuyên dụng để đồng bộ danh tính cá nhân (Facebook Profile) và các Fanpage quản trị lên hệ thống **Fb Sheet Manager By BugLab** (`https://facebook.buglab.vn`).
+Extension Chrome (Manifest V3) chuyên dụng để đồng bộ danh tính cá nhân (Facebook Profile) và các Fanpage quản trị lên hệ thống **Fb Sheet Manager** (`https://facebook.buglogin.com`).
 
 ## ✨ Tính năng chính
 
@@ -27,8 +27,8 @@ Extension Chrome (Manifest V3) chuyên dụng để đồng bộ danh tính cá 
    - Chọn thư mục extension vừa giải nén.
 
 3. **Cấu hình Token nhân viên**:
-   - Truy cập trang quản trị [facebook.buglab.vn/sheet?tab=users](https://facebook.buglab.vn/sheet?tab=users) và đăng nhập bằng tài khoản của bạn.
-   - Tại dòng tài khoản của bạn, nhấn nút **Copy Token** (hoặc tạo mới nếu chưa có).
+   - Truy cập trang tài khoản [facebook.buglogin.com/sheet?tab=users](https://facebook.buglogin.com/sheet?tab=users) và đăng nhập.
+   - Bấm **Copy token** ở ô API Token của bạn.
    - Nhấp vào biểu tượng Extension trên thanh công cụ để mở giao diện làm việc.
    - Chọn mục **"Cài đặt"** ở menu bên trái -> Dán Token vào ô **API Token của nhân viên** -> Nhấn **"Lưu Token"**.
 

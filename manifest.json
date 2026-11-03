@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "bug sync - facebook",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Đồng bộ profile Facebook cá nhân và các Page bạn quản lý nhanh chóng chỉ với 1 click.",
   "permissions": ["cookies", "storage", "tabs", "declarativeNetRequest"],
   "host_permissions": [
     "https://*.facebook.com/*",
-    "https://facebook.buglab.vn/*"
+    "https://facebook.buglogin.com/*"
   ],
   "background": {
     "service_worker": "background.js"
