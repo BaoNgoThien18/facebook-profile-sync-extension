@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "bug sync - facebook",
-  "version": "1.7.0",
+  "version": "1.7.4",
   "description": "Đồng bộ profile Facebook cá nhân và các Page bạn quản lý nhanh chóng chỉ với 1 click.",
   "permissions": ["cookies", "storage", "tabs", "declarativeNetRequest"],
   "host_permissions": [
@@ -35,6 +35,7 @@
       "js": [
         "modules/facebook/profile-context.js",
         "modules/facebook/insights-metrics.js",
+        "modules/facebook/content-summary.js",
         "modules/facebook/page-assets.js",
         "modules/ui/status-toast.js",
         "content.js"

@@ -77,21 +77,16 @@
       tdId.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, monospace";
       tdId.textContent = page.id;
 
-      // Cột 3: Video 7 ngày
-      const tdVideos = document.createElement("td");
-      const videoBadge = document.createElement("span");
-      videoBadge.className = "badge-count";
-      const vidCount = Number.isSafeInteger(page.video_count_7d) ? page.video_count_7d : "—";
-      videoBadge.textContent = `${vidCount} video`;
-      tdVideos.append(videoBadge);
-
-      // Cột 4: Lượt xem 7 ngày
-      const tdViews = document.createElement("td");
-      const viewsBadge = document.createElement("span");
-      viewsBadge.className = "badge-views";
-      const viewsCount = Number.isSafeInteger(page.views_7d) ? page.views_7d.toLocaleString() : "—";
-      viewsBadge.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${viewsCount} views`;
-      tdViews.append(viewsBadge);
+      const tdContent = document.createElement("td");
+      const contentBadge = document.createElement("span");
+      contentBadge.className = "badge-views";
+      const viewNumber = Number.isFinite(page.insights?.overview?.views) ? page.insights.overview.views : page.views_7d;
+      const videoNumber = Number.isFinite(page.video_count_7d) ? page.video_count_7d : page.insights?.contents?.length;
+      const viewText = Number.isFinite(viewNumber) ? Number(viewNumber).toLocaleString() : "—";
+      const videoText = Number.isFinite(videoNumber) ? videoNumber : "—";
+      contentBadge.textContent = `${viewText} view · ${videoText} video`;
+      contentBadge.title = page.insights ? "Đã lưu JSON Content Insights" : "Chưa có JSON Content Insights";
+      tdContent.append(contentBadge);
 
       // Cột 5: Trạng thái
       const tdStatus = document.createElement("td");
@@ -114,7 +109,7 @@
       };
       tdAction.append(openBtn);
 
-      tr.append(tdPage, tdId, tdVideos, tdViews, tdStatus, tdAction);
+      tr.append(tdPage, tdId, tdContent, tdStatus, tdAction);
       tbody.append(tr);
     }
   }
@@ -165,18 +160,17 @@
     if (!token) {
       if (banner) banner.hidden = false;
       if (syncBtn) {
-        syncBtn.disabled = true;
-        syncBtn.title = "Vui lòng nhập Token nhân viên trong Cài đặt trước khi sử dụng.";
+        syncBtn.disabled = false;
+        syncBtn.title = "Quét số video và lượt xem trên dashboard. Chưa đẩy lên server vì chưa có Token.";
       }
       return "";
-    } else {
-      if (banner) banner.hidden = true;
-      if (syncBtn) {
-        syncBtn.disabled = false;
-        syncBtn.title = "";
-      }
-      return token;
     }
+    if (banner) banner.hidden = true;
+    if (syncBtn) {
+      syncBtn.disabled = false;
+      syncBtn.title = "";
+    }
+    return token;
   }
 
   async function refresh() {
@@ -348,27 +342,22 @@
 
   $("#sync-now-button").addEventListener("click", async () => {
     const token = await checkTokenRequirement();
-    if (!token) {
-      $("#sync-status").textContent = "Vui lòng cấu hình Token nhân viên trong Cài đặt trước.";
-      switchView("settings");
-      const input = $("#input-user-token");
-      if (input) setTimeout(() => input.focus(), 150);
-      return;
-    }
-
     const button = $("#sync-now-button");
     button.disabled = true;
     button.lastChild.textContent = " Đang đồng bộ…";
-    $("#sync-status").textContent = "Đang gọi request Facebook…";
+    $("#sync-status").textContent = token
+      ? "Đang lấy Page, video và lượt xem…"
+      : "Đang lấy Page, video và lượt xem. Chưa đẩy lên server.";
     chrome.runtime.sendMessage({ action: "MANUAL_SYNC" }, async response => {
       const transportError = chrome.runtime.lastError?.message;
       if (transportError || !response?.success) {
         $("#sync-status").textContent = response?.error || transportError || "Đồng bộ thất bại.";
       } else {
         const pageCount = Number(response.pageCount) || 0;
-        $("#sync-status").textContent = pageCount > 0
+        const localNote = response.localOnly ? " Đã lấy video và lượt xem. Không đồng bộ lên server." : "";
+        $("#sync-status").textContent = (pageCount > 0
           ? `Đã đồng bộ profile và ${pageCount} Page.`
-          : "Đã đồng bộ profile; không có Page đang hoạt động.";
+          : "Đã đồng bộ profile; không có Page đang hoạt động.") + localNote;
       }
       button.disabled = false;
       button.lastChild.textContent = " Đồng bộ ngay";

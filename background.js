@@ -68,6 +68,86 @@ if (typeof chrome !== "undefined") {
   setupDNRRules();
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function waitForTabComplete(tabId, timeoutMs = 20000) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    const onUpdated = (id, info) => {
+      if (id === tabId && info.status === "complete") {
+        clearTimeout(timer);
+        finish();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.get(tabId).then(tab => {
+      if (tab?.status === "complete") {
+        clearTimeout(timer);
+        finish();
+      }
+    }).catch(() => {});
+  });
+}
+
+async function readContentSummaryTab(tabId) {
+  const started = Date.now();
+  while (Date.now() - started < 28000) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, { action: "READ_CONTENT_SUMMARY" });
+      if (response?.ready && response.insights) return response.insights;
+    } catch (_) {}
+    await delay(1000);
+  }
+  return null;
+}
+
+function applyInsights(page, insights) {
+  page.insights = insights;
+  if (Number.isFinite(insights?.overview?.views)) page.views_7d = insights.overview.views;
+  const published = Number(insights?.formats?.reels || 0) + Number(insights?.formats?.stories || 0);
+  const counted = published || (Array.isArray(insights?.contents) ? insights.contents.length : 0);
+  if (counted > 0) page.video_count_7d = counted;
+}
+
+async function scrapeContentSummaries(pages, profileId) {
+  if (!pages.length || typeof chrome === "undefined" || !chrome.tabs?.create) return 0;
+  let tab = null;
+  let scraped = 0;
+  try {
+    tab = await chrome.tabs.create({ url: "about:blank", active: false });
+    for (let index = 0; index < pages.length; index += 1) {
+      const page = pages[index];
+      const assetId = String(page.assetId || page.asset_id || page.id || page.pageId || "");
+      if (!/^[1-9]\d{0,31}$/.test(assetId)) continue;
+      const url = `https://business.facebook.com/latest/insights/content_summary?asset_id=${assetId}`;
+      await setSyncStatus("checking", `Đang mở Content Insights ${index + 1}/${pages.length} và đợi trang tải...`, { profileId });
+      await chrome.tabs.update(tab.id, { url });
+      await waitForTabComplete(tab.id);
+      const insights = await readContentSummaryTab(tab.id);
+      if (insights?.overview || insights?.contents?.length) {
+        applyInsights(page, insights);
+        scraped += 1;
+      }
+    }
+  } catch (error) {
+    console.warn("[Background] Không đọc được Content Insights:", error);
+  } finally {
+    if (tab?.id != null) {
+      try { await chrome.tabs.remove(tab.id); } catch (_) {}
+    }
+  }
+  return scraped;
+}
+
 async function setSyncStatus(state, message, details = {}) {
   if (typeof chrome !== "undefined" && chrome.storage?.local?.set) {
     await chrome.storage.local.set({ profile_page_sync_status: {
@@ -80,14 +160,12 @@ async function setSyncStatus(state, message, details = {}) {
 }
 
 async function runManualSync() {
-  // Bắt buộc phải có token nhân viên mới cho sử dụng
+  // Không có token vẫn quét Page, số video và lượt xem để hiện trên dashboard.
+  // Token chỉ dùng khi đẩy dữ liệu lên server.
   let employeeToken = "";
   if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
     const tokenData = await chrome.storage.local.get("buglab_user_api_token");
     employeeToken = (tokenData?.buglab_user_api_token || "").trim();
-  }
-  if (!employeeToken) {
-    throw new Error("Vui lòng nhập API Token nhân viên trong Cài đặt trước khi sử dụng tool.");
   }
 
   const cookies = (typeof chrome !== "undefined" && chrome.cookies?.getAll)
@@ -114,54 +192,66 @@ async function runManualSync() {
         dtsg: account.dtsg,
         userId: realUid,
       });
-
-      // Lấy view và số lượng video 7 ngày qua cho từng page nếu có token
-      if (typeof FacebookBusinessInsightsApi !== "undefined" && FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews && account.dtsg) {
-        await setSyncStatus("checking", `Đang lấy video và views 7 ngày qua cho ${pages.length} Page...`, { profileId: realUid });
-        for (const page of pages) {
-          const pageId = page.id || page.pageId;
-          if (!pageId) continue;
-          try {
-            const stats = await FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews(pageId, {
-              fb_dtsg: account.dtsg,
-              lsd: account.lsd || "cB4dmWcFc9EdW3lIItBEZs",
-            });
-            if (stats?.hasData || Number.isSafeInteger(stats?.views_7d)) {
-              page.views_7d = stats.views_7d || 0;
-              page.video_count_7d = stats.video_count_7d || 0;
-            }
-          } catch (statErr) {
-            console.warn(`[Background] Không lấy được stats video 7d cho page ${pageId}:`, statErr);
-          }
-        }
-      }
     } catch (apiError) {
       console.warn("[Background] FacebookAPI trực tiếp gặp lỗi, thử fallback qua Tab:", apiError);
     }
   }
 
-  // 2. Fallback qua Tab content script nếu direct fetch chưa thành công
-  if (!account || !account.name || account.name === "Facebook User") {
-    if (typeof chrome !== "undefined" && chrome.tabs?.query) {
-      const tabs = await chrome.tabs.query({ url: [
-        "https://facebook.com/*",
-        "https://www.facebook.com/*",
-        "https://*.facebook.com/*",
-      ] });
-      const facebookTabs = tabs.filter(tab => {
-        if (tab.id == null) return false;
-        try { return new URL(tab.url).hostname !== "business.facebook.com"; }
-        catch (_) { return false; }
-      });
-      facebookTabs.sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)) ||
-        Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
-      const targetTab = facebookTabs[0];
+  // 2. Fallback qua Tab chỉ để lấy tên profile và danh sách Page.
+  // Không kết thúc ở đây: view và video luôn được quét ở bước sau.
+  const needsTabList = !account || !account.name || account.name === "Facebook User" || !pages.length;
+  if (needsTabList && typeof chrome !== "undefined" && chrome.tabs?.query) {
+    const tabs = await chrome.tabs.query({ url: [
+      "https://facebook.com/*",
+      "https://www.facebook.com/*",
+      "https://*.facebook.com/*",
+    ] });
+    const facebookTabs = tabs.filter(tab => {
+      if (tab.id == null) return false;
+      try { return new URL(tab.url).hostname !== "business.facebook.com"; }
+      catch (_) { return false; }
+    });
+    facebookTabs.sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)) ||
+      Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+    const targetTab = facebookTabs[0];
 
-      if (targetTab?.id != null) {
-        try {
-          const tabResult = await chrome.tabs.sendMessage(targetTab.id, { action: "RUN_MANUAL_SYNC", profileId });
-          if (tabResult?.success) return tabResult;
-        } catch (_) {}
+    if (targetTab?.id != null) {
+      try {
+        const collected = await chrome.tabs.sendMessage(targetTab.id, { action: "COLLECT_PROFILE_AND_PAGES", profileId });
+        if (collected?.success) {
+          const collectedName = String(collected.profile?.name || "").trim();
+          if (collectedName && !/^facebook(?: user)?$/i.test(collectedName)) {
+            account = {
+              ...(account || {}),
+              name: collectedName,
+              cUserId: collected.profile?.profileId || account?.cUserId || profileId,
+              avatar: collected.profile?.avatar || account?.avatar || "",
+            };
+          }
+          if (!pages.length && Array.isArray(collected.pages)) pages = collected.pages;
+        }
+      } catch (_) {}
+    }
+  }
+
+  const statsProfileId = account?.cUserId || account?.userId || profileId;
+  const scrapedCount = await scrapeContentSummaries(pages, statsProfileId);
+  if (!scrapedCount && pages.length && account?.dtsg && typeof FacebookBusinessInsightsApi !== "undefined" && FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews) {
+    await setSyncStatus("checking", `Đang lấy video và views 7 ngày qua cho ${pages.length} Page...`, { profileId: statsProfileId });
+    for (const page of pages) {
+      const pageId = page.id || page.pageId;
+      if (!pageId) continue;
+      try {
+        const stats = await FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews(pageId, {
+          fb_dtsg: account.dtsg,
+          lsd: account.lsd || "cB4dmWcFc9EdW3lIItBEZs",
+        });
+        if (stats?.hasData || Number.isSafeInteger(stats?.views_7d) || Number.isSafeInteger(stats?.video_count_7d)) {
+          page.views_7d = Number.isSafeInteger(stats.views_7d) ? stats.views_7d : 0;
+          page.video_count_7d = Number.isSafeInteger(stats.video_count_7d) ? stats.video_count_7d : 0;
+        }
+      } catch (statErr) {
+        console.warn(`[Background] Không lấy được stats video 7d cho page ${pageId}:`, statErr);
       }
     }
   }
@@ -169,16 +259,18 @@ async function runManualSync() {
   const realProfileId = account?.cUserId || account?.userId || profileId;
   const realName = account?.name && account.name !== "Facebook User" ? account.name : `Facebook User ${realProfileId}`;
 
-  // Kiểm tra cài đặt đồng bộ server
-  let isServerSyncOn = true;
-  if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
+  // Kiểm tra cài đặt đồng bộ server. Không có token thì chỉ lưu local.
+  let isServerSyncOn = Boolean(employeeToken);
+  if (employeeToken && typeof chrome !== "undefined" && chrome.storage?.local?.get) {
     const config = await chrome.storage.local.get("buglab_server_sync_enabled");
     isServerSyncOn = config?.buglab_server_sync_enabled !== false;
   }
 
-  const statusMsg = isServerSyncOn
-    ? "Đang lưu dữ liệu Profile và Page lên hệ thống BugLab..."
-    : "Đang lưu dữ liệu Profile và Page trên Dashboard (Server sync: Tắt)...";
+  const statusMsg = !employeeToken
+    ? "Đã lấy video và lượt xem. Đang lưu trên dashboard, không đẩy server…"
+    : isServerSyncOn
+      ? "Đang lưu dữ liệu Profile, Page, video và lượt xem lên hệ thống BugLab..."
+      : "Đã lấy video và lượt xem. Đang lưu trên dashboard (Server sync: Tắt)...";
 
   await setSyncStatus("checking", statusMsg, {
     profileId: realProfileId,
@@ -190,7 +282,7 @@ async function runManualSync() {
     name: realName,
     avatar: account?.avatar || `https://graph.facebook.com/${realProfileId}/picture?height=100`,
     profileUrl: `https://facebook.com/${realProfileId}`,
-  }, pages, { allowFanpageMode: true });
+  }, pages, { allowFanpageMode: true, enableServerSync: isServerSyncOn });
 
   if (!syncResult?.success) {
     throw new Error(syncResult?.error || "Đồng bộ Facebook thất bại.");
@@ -201,7 +293,9 @@ async function runManualSync() {
   let syncMessage = pageCount > 0
     ? `Đã đồng bộ profile và ${pageCount} Page.`
     : "Đã đồng bộ profile; Facebook hiện không có Page đang hoạt động để đồng bộ.";
-  if (!isServerSyncOn) {
+  if (!employeeToken) {
+    syncMessage += " Đã quét số video và lượt xem. Chưa đẩy server vì chưa có Token.";
+  } else if (!isServerSyncOn) {
     syncMessage += " (Chế độ chỉ hiển thị Dashboard)";
   }
 
@@ -222,6 +316,7 @@ async function runManualSync() {
           avatar: String(p.avatar || ""),
           views_7d: p.views_7d ?? null,
           video_count_7d: p.video_count_7d ?? null,
+          ...(p.insights ? { insights: p.insights } : {}),
         })),
       },
       profile_page_sync_last_success: {
@@ -238,7 +333,7 @@ async function runManualSync() {
     });
   }
 
-  return { success: true, profileId: realProfileId, pageCount, syncedAt };
+  return { success: true, profileId: realProfileId, pageCount, syncedAt, localOnly: !employeeToken };
 }
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {

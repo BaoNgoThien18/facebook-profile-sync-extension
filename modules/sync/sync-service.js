@@ -42,15 +42,17 @@
       ? Boolean(dependencies.enableServerSync)
       : await isServerSyncEnabled();
 
+    let uploadToken = "";
     if (serverSyncActive) {
       if (typeof dependencies.getUserApiToken === "function") {
-        const token = await dependencies.getUserApiToken();
-        if (!token) throw new Error("Vui lòng nhập API Token nhân viên trong Cài đặt trước khi sử dụng tool.");
+        uploadToken = String(await dependencies.getUserApiToken() || "").trim();
       } else if (typeof FacebookSyncApi !== "undefined" && FacebookSyncApi.getUserApiToken) {
-        const token = await FacebookSyncApi.getUserApiToken();
-        if (!token) throw new Error("Vui lòng nhập API Token nhân viên trong Cài đặt trước khi sử dụng tool.");
+        uploadToken = String(await FacebookSyncApi.getUserApiToken() || "").trim();
       }
+    }
 
+    // Không có token thì bỏ qua đẩy server, vẫn lưu local bên dưới.
+    if (serverSyncActive && uploadToken) {
       await syncProfile({
         fb_uid: profileId,
         name: profileName,
@@ -66,6 +68,7 @@
         page_url: `https://facebook.com/${page.id}`,
         ...(Number.isSafeInteger(page.views_7d) ? { views_7d: page.views_7d } : {}),
         ...(Number.isSafeInteger(page.video_count_7d) ? { video_count_7d: page.video_count_7d, videos_7d: page.video_count_7d } : {}),
+        ...(page.insights ? { insights: page.insights } : {}),
       })));
     }
 
@@ -79,6 +82,7 @@
           ...(page.avatar ? { avatar: String(page.avatar) } : {}),
           ...(Number.isSafeInteger(page.views_7d) ? { views_7d: page.views_7d } : {}),
           ...(Number.isSafeInteger(page.video_count_7d) ? { video_count_7d: page.video_count_7d } : {}),
+          ...(page.insights ? { insights: page.insights } : {}),
         })),
       }, profile_page_sync_profile: {
         id: profileId,

@@ -224,23 +224,6 @@
       if (hasMoved) return; // Nếu vừa kéo thả thì không trigger click
       if (inFlight) return;
 
-      // Kiểm tra token nhân viên trước khi cho phép chạy đồng bộ
-      let token = "";
-      if (typeof chrome !== "undefined" && chrome.storage?.local?.get) {
-        try {
-          const res = await chrome.storage.local.get("buglab_user_api_token");
-          token = (res?.buglab_user_api_token || "").trim();
-        } catch (_) {}
-      }
-      if (!token) {
-        statusMsg.style.display = "block";
-        statusMsg.textContent = "Chưa nhập Token nhân viên! Đang mở Cài đặt…";
-        statusMsg.style.color = "#fca5a5";
-        chrome.runtime.sendMessage({ action: "OPEN_DASHBOARD" });
-        setTimeout(() => { statusMsg.style.display = "none"; }, 5000);
-        return;
-      }
-
       inFlight = true;
       const textSpan = btn.querySelector("#bug-sync-btn-text");
       const spinner = btn.querySelector("#bug-sync-spinner");
@@ -347,7 +330,32 @@
     }
   }
 
+  async function collectProfileAndPages(profileId) {
+    if (!/^[1-9]\d{0,31}$/.test(String(profileId || ""))) {
+      throw new Error("Không đọc được ID profile Facebook đang đăng nhập.");
+    }
+    const profile = await requestProfileDetails(profileId);
+    const pages = await requestManagedPages();
+    return { success: true, profile, pages };
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.action === "READ_CONTENT_SUMMARY") {
+      try {
+        const insights = globalThis.FacebookContentSummary?.readContentSummary(document, location.href);
+        const ready = Number.isFinite(insights?.overview?.views) || (insights?.contents || []).length > 0;
+        sendResponse({ success: true, ready, insights });
+      } catch (error) {
+        sendResponse({ success: false, ready: false, error: error?.message || "Không đọc được Content Insights." });
+      }
+      return true;
+    }
+    if (message?.action === "COLLECT_PROFILE_AND_PAGES") {
+      collectProfileAndPages(message.profileId).then(sendResponse).catch(error => {
+        sendResponse({ success: false, error: error?.message || "Không đọc được profile và Page." });
+      });
+      return true;
+    }
     if (message?.action !== "RUN_MANUAL_SYNC") return false;
     syncProfileAndPages(message.profileId).then(sendResponse).catch(error => {
       sendResponse({ success: false, error: error?.message || "Đồng bộ Facebook thất bại." });

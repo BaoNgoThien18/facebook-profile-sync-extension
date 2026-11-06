@@ -55,6 +55,54 @@ test('background accepts dashboard requests and forwards Facebook data to the sy
   assert.equal(dashboardResult.success, false);
 });
 
+test('manual sync still fetches views and videos when the employee token is missing', async () => {
+  let listener;
+  const writes = [];
+  const serverCalls = [];
+  const chrome = {
+    runtime: { id: 'extension-id', onMessage: { addListener: callback => { listener = callback; } } },
+    action: { onClicked: { addListener() {} } },
+    cookies: { getAll: async () => [{ name: 'c_user', value: '100' }, { name: 'i_user', value: '0' }] },
+    storage: { local: {
+      get: async () => ({}),
+      set: async value => { writes.push(value); },
+    } },
+  };
+  const worker = vm.createContext({
+    chrome, URL, Date, Promise, Error, console,
+    importScripts() {},
+    FacebookAPI: {
+      getAccountAndDtsg: async () => ({ name: 'Profile A', cUserId: '100', dtsg: 'dtsg', lsd: 'lsd', avatar: '' }),
+      getUserPages: async () => [{ id: '200', name: 'Page A' }],
+    },
+    FacebookBusinessInsightsApi: {
+      fetchWeeklyVideosAndViews: async pageId => {
+        assert.equal(pageId, '200');
+        return { hasData: true, views_7d: 15, video_count_7d: 2 };
+      },
+    },
+    ProfilePageSync: {
+      syncPageList: async (profile, pages, options) => {
+        serverCalls.push({ profile, pages, options });
+        return { success: true, profileId: profile.profileId, pageCount: pages.length };
+      },
+    },
+  });
+  vm.runInContext(fs.readFileSync(path.join(root, 'background.js'), 'utf8'), worker);
+  const result = await new Promise(resolve => {
+    assert.equal(listener({ action: 'MANUAL_SYNC' }, { id: 'extension-id' }, resolve), true);
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.localOnly, true);
+  assert.equal(serverCalls.length, 1);
+  assert.equal(serverCalls[0].options.enableServerSync, false);
+  assert.equal(serverCalls[0].pages[0].views_7d, 15);
+  assert.equal(serverCalls[0].pages[0].video_count_7d, 2);
+  const pageWrite = writes.find(value => value.profile_page_sync_pages);
+  assert.equal(pageWrite.profile_page_sync_pages['100'][0].views_7d, 15);
+  assert.equal(pageWrite.profile_page_sync_pages['100'][0].video_count_7d, 2);
+});
+
 test('content sync reads the rendered managed Page list and reuses the same profile cache', async () => {
   let listener;
   let uploaded;
@@ -158,6 +206,36 @@ test('syncs profile and Page records from the request-only managed Page list', a
   assert.equal(calls[0].profile.fb_uid, '100');
   assert.equal(calls[1].pages[0].page_uid, '200');
   assert.equal(calls[1].pages[0].avatar_url, 'https://img.test/page.png');
+});
+
+test('scans pages locally when the employee token is missing', async () => {
+  const calls = [];
+  const stored = [];
+  const previousChrome = context.chrome;
+  context.chrome = {
+    storage: { local: {
+      get: async () => ({}),
+      set: async value => { stored.push(value); },
+    } },
+  };
+  try {
+    const result = await ProfilePageSync.syncPageList({
+      profileId: '100', name: 'Profile A', avatar: 'https://img.test/profile.png',
+    }, [{ pageId: '200', name: 'Page A', views_7d: 12, video_count_7d: 3 }], {
+      getUserApiToken: async () => '',
+      getCookies: async () => [{ name: 'c_user', value: '100' }, { name: 'i_user', value: '0' }],
+      syncProfile: async profile => { calls.push({ kind: 'profile', profile }); },
+      syncPages: async pages => { calls.push({ kind: 'pages', pages }); },
+      enableServerSync: true,
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { success: true, profileId: '100', pageCount: 1 });
+    assert.equal(calls.length, 0);
+    assert.equal(stored[0].profile_page_sync_pages['100'][0].views_7d, 12);
+    assert.equal(stored[0].profile_page_sync_pages['100'][0].video_count_7d, 3);
+  } finally {
+    if (previousChrome === undefined) delete context.chrome;
+    else context.chrome = previousChrome;
+  }
 });
 
 test('skips server sync when enableServerSync is false but succeeds locally', async () => {
@@ -481,6 +559,63 @@ test('FacebookAPI.getUserPages falls back to Strategy 3 (mbasic HTML Scraping)',
   assert.equal(pages[1].name, 'Phu Kien Dien Thoai');
 });
 
+
+test('reads the rendered content summary page into one insights payload', () => {
+  const fixture = path.join(root, 'request/contewnt-insignt.html');
+  if (!fs.existsSync(fixture)) return;
+  const html = fs.readFileSync(fixture, 'utf8');
+  const visible = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, '\n')
+    .replace(/&amp;/g, '&');
+  const anchors = [...html.matchAll(/<a\b[^>]*href="([^"]+)"/gi)].map(match => ({
+    getAttribute: () => match[1],
+  }));
+  const context = vm.createContext({ Date, String, Number, Math, RegExp, Array, document: {} });
+  context.globalThis = context;
+  vm.runInContext(fs.readFileSync(path.join(root, 'modules/facebook/content-summary.js'), 'utf8'), context);
+  const insights = context.FacebookContentSummary.readContentSummary({
+    body: { innerText: visible },
+    location: { href: 'https://business.facebook.com/latest/insights/content_summary?asset_id=1438624289328026' },
+    querySelectorAll: () => anchors,
+  }, 'https://business.facebook.com/latest/insights/content_summary?asset_id=1438624289328026');
+  assert.equal(insights.asset_id, '1438624289328026');
+  assert.equal(insights.range.days, 28);
+  assert.equal(insights.overview.views, 1269600);
+  assert.equal(insights.overview.viewers, 881081);
+  assert.equal(insights.overview.three_second_views, 587100);
+  assert.equal(insights.overview.interactions, 55600);
+  assert.equal(insights.overview.watch_time, '105d 20h');
+  assert.equal(insights.formats.reels, 13);
+  assert.equal(insights.formats.stories, 1);
+  assert.equal(insights.formats.views.reels, 1269587);
+  assert.equal(insights.formats.views.photo, 9);
+  assert.equal(insights.formats.views.others, 6);
+  assert.equal(insights.formats.interactions.reels, 55623);
+  assert.equal(insights.formats.interactions.photo, 1);
+  assert.equal(insights.contents.length, 8);
+  assert.equal(insights.contents[0].views, 510500);
+  assert.ok(insights.contents.every(item => item.content_id && item.content_url === `https://www.facebook.com/1438624289328026/posts/${item.content_id}`));
+  assert.ok(insights.contents[0].links.some(link => link.startsWith('https://threadchico.com/')));
+  assert.equal(insights.contents[0].content_url, 'https://www.facebook.com/1438624289328026/posts/122110256031516759');
+});
+
+test('stores the video thumbnail from the content card image', () => {
+  const context = vm.createContext({ Date, String, Number, Math, RegExp, Array, document: {} });
+  context.globalThis = context;
+  vm.runInContext(fs.readFileSync(path.join(root, 'modules/facebook/content-summary.js'), 'utf8'), context);
+  const insights = context.FacebookContentSummary.readContentSummary({
+    body: { innerText: 'Last 28 days: Oct 8, 2026 - Nov 4, 2026 Views 1.2M 10% Viewers 100,000 1% 3-second views 10K 1% Content interactions 1K 1% Watch time 1d 2h 1% Reels 1 Stories 0 Top content by views Sample caption Sun Nov 1, 1:00 am 10K 20 1 2 Top content formats' },
+    location: { href: 'https://business.facebook.com/latest/insights/content_summary?asset_id=1438624289328026' },
+    querySelectorAll: () => [{
+      getAttribute: () => '/latest/insights/object_insights/?content_id=122110256031516759',
+      querySelector: () => ({ getAttribute: () => 'https://scontent.example/video-thumb.jpg' }),
+    }],
+  });
+  assert.equal(insights.contents[0].thumbnail, 'https://scontent.example/video-thumb.jpg');
+  assert.equal(insights.contents[0].content_url, 'https://www.facebook.com/1438624289328026/posts/122110256031516759');
+});
 
 test('FacebookBusinessInsightsApi parses actual request/contents response correctly', async () => {
   const fs = require('fs');
