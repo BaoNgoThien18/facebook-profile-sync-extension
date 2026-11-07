@@ -2,4 +2,6 @@
 node_modules
 *.log
 Archive.zip
+*.zip
 request/
+deploy*.sh
