@@ -440,7 +440,7 @@ test('FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews extracts video count
 
   const vars = JSON.parse(body.get('variables'));
   assert.deepEqual(vars.ids, ['649510394916531']);
-  assert.equal(vars.timeRange.type, 'LAST_7D');
+  assert.equal(vars.timeRange.type, 'LAST_28D');
 
   assert.equal(result.video_count_7d, 2);
   assert.equal(result.views_7d, 4750);

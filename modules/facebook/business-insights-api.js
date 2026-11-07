@@ -277,7 +277,7 @@
       skipAllIDs: false,
       sortDirection: "DESC",
       sortKey: "DATE",
-      timeRange: { type: "LAST_7D" },
+      timeRange: { type: "LAST_28D" },
       visibleColumnKeys: [
         "TITLE", "DATE", "VIDEO_STATUS", "REACH", "VIEWS", "VIEWERS",
         "NEW_FOLLOWS", "NET_INTERACTIONS", "NET_REACTIONS", "NET_COMMENTS",

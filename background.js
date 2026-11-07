@@ -236,7 +236,10 @@ async function runManualSync() {
 
   const statsProfileId = account?.cUserId || account?.userId || profileId;
   const scrapedCount = await scrapeContentSummaries(pages, statsProfileId);
-  if (!scrapedCount && pages.length && account?.dtsg && typeof FacebookBusinessInsightsApi !== "undefined" && FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews) {
+
+  // Dù đã scrape tab hay chưa, nếu có account.dtsg và FacebookBusinessInsightsApi thì luôn gọi GraphQL
+  // để lấy trọn vẹn danh sách video đầy đủ (views, reactions, comments, links, thumbnails)
+  if (pages.length && account?.dtsg && typeof FacebookBusinessInsightsApi !== "undefined" && FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews) {
     await setSyncStatus("checking", `Đang lấy video và views 28 ngày qua cho ${pages.length} Page...`, { profileId: statsProfileId });
     for (const page of pages) {
       const pageId = page.id || page.pageId;
@@ -247,13 +250,17 @@ async function runManualSync() {
           lsd: account.lsd || "cB4dmWcFc9EdW3lIItBEZs",
         });
         if (stats?.hasData || Number.isSafeInteger(stats?.views_7d) || Number.isSafeInteger(stats?.video_count_7d) || Array.isArray(stats?.contents)) {
-          page.views_7d = Number.isSafeInteger(stats?.views_7d) ? stats.views_7d : 0;
-          page.video_count_7d = Number.isSafeInteger(stats?.video_count_7d) ? stats.video_count_7d : (stats?.contents?.length || 0);
+          if (Number.isSafeInteger(stats?.views_7d) && (!page.views_7d || page.views_7d === 0)) {
+            page.views_7d = stats.views_7d;
+          }
           if (Array.isArray(stats?.contents) && stats.contents.length > 0) {
+            page.video_count_7d = stats.contents.length;
             page.insights = {
               ...(page.insights || {}),
               contents: stats.contents,
             };
+          } else if (Number.isSafeInteger(stats?.video_count_7d) && (!page.video_count_7d || page.video_count_7d === 0)) {
+            page.video_count_7d = stats.video_count_7d;
           }
         }
       } catch (statErr) {
