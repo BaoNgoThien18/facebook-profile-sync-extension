@@ -7,9 +7,131 @@
   const POSTS_FRIENDLY_NAME = "useBizWebUnifiedTableInitialLoad_data_refetchable";
 
   function parseResponse(raw) {
-    return String(raw || "").split(/\r?\n/).map(line => {
-      try { return JSON.parse(line.replace(/^for \(;;\);/, "")); } catch (_) { return null; }
-    }).filter(Boolean);
+    const text = String(raw || "").trim();
+    if (!text) return [];
+
+    // 1. Thử parse dạng chuẩn mỗi dòng một JSON (newline-delimited JSON)
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const parsedLines = [];
+    for (const line of lines) {
+      try {
+        parsedLines.push(JSON.parse(line.replace(/^for \(;;\);/, "")));
+      } catch (_) {}
+    }
+    if (parsedLines.length > 0 && parsedLines.length === lines.length) {
+      return parsedLines;
+    }
+
+    // 2. Fallback: Parse chuỗi stream / multipart gồm nhiều JSON object nối tiếp hoặc cách nhau bởi khoảng trắng
+    const chunks = [];
+    let remaining = text.replace(/^for \(;;\);/, "").trimStart();
+    while (remaining.length > 0) {
+      try {
+        chunks.push(JSON.parse(remaining));
+        break;
+      } catch (_) {
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+        let endIdx = -1;
+        for (let i = 0; i < remaining.length; i++) {
+          const c = remaining[i];
+          if (escape) {
+            escape = false;
+            continue;
+          }
+          if (c === "\\") {
+            escape = true;
+            continue;
+          }
+          if (c === '"') {
+            inString = !inString;
+            continue;
+          }
+          if (!inString) {
+            if (c === "{" || c === "[") depth++;
+            else if (c === "}" || c === "]") {
+              depth--;
+              if (depth === 0) {
+                endIdx = i + 1;
+                break;
+              }
+            }
+          }
+        }
+        if (endIdx !== -1) {
+          try {
+            chunks.push(JSON.parse(remaining.slice(0, endIdx)));
+          } catch (_) {}
+          remaining = remaining.slice(endIdx).trimStart();
+        } else {
+          break;
+        }
+      }
+    }
+    return chunks;
+  }
+
+  function extractContentsFromResponses(responses, pageUid) {
+    const list = [];
+    const seenIds = new Set();
+
+    for (const res of (Array.isArray(responses) ? responses : [responses])) {
+      const edges = res?.data?.tofu_unified_table?.content?.edges;
+      if (!Array.isArray(edges)) continue;
+
+      for (const edge of edges) {
+        const node = edge?.node || {};
+        const header = node.header || {};
+        const entityInfo = header.entity?.entity_info || {};
+        const fields = node.fields || {};
+
+        const videoId = entityInfo.video?.id || entityInfo.entity_id || node.row_id;
+        const idStr = String(videoId || "");
+        if (idStr && seenIds.has(idStr)) continue;
+        if (idStr) seenIds.add(idStr);
+
+        const title = entityInfo.title || "";
+        const createdAtSec = entityInfo.created_at || (fields.date?.renderer?.date_time);
+        const publishedAtStr = createdAtSec ? new Date(createdAtSec * 1000).toISOString() : "";
+        const thumbnail = entityInfo.image_source?.uri || null;
+
+        // Views
+        let views = fields.views?.renderer?.result?.value;
+        if (views === undefined || views === null) {
+          views = fields.views?.renderer?.value_for_sort;
+        }
+        const numViews = Number.isFinite(views) && views >= 0 ? views : 0;
+
+        // Reactions / Comments / Shares
+        const reactions = fields.net_reactions?.renderer?.result?.value ?? 0;
+        const comments = fields.net_comments?.renderer?.result?.value ?? 0;
+        const shares = fields.shares?.renderer?.result?.value ?? 0;
+
+        // Trích xuất links sản phẩm từ tiêu đề
+        const links = (title.match(/https?:\/\/[^\s<>"#]+/g) || []).map(l => l.trim());
+
+        const ownerId = entityInfo.owner?.entity_id || pageUid;
+        const contentUrl = ownerId && idStr
+          ? `https://facebook.com/${ownerId}/videos/${idStr}`
+          : (idStr ? `https://facebook.com/${idStr}` : null);
+
+        list.push({
+          title,
+          published_at: publishedAtStr,
+          content_id: idStr,
+          content_url: contentUrl,
+          thumbnail,
+          links,
+          views: numViews,
+          reactions,
+          comments,
+          shares,
+        });
+      }
+    }
+
+    return list;
   }
 
   function sumViews(responses) {
@@ -191,7 +313,12 @@
 
     if (!response.ok) throw new Error(`Business Suite posts API trả HTTP ${response.status}.`);
     const parsed = parseResponse(await response.text());
-    return parseWeeklyVideosAndViews(parsed);
+    const stats = parseWeeklyVideosAndViews(parsed);
+    const contents = extractContentsFromResponses(parsed, id);
+    return {
+      ...stats,
+      contents,
+    };
   }
 
   async function fetchPageViews7d(assetId, requestContext, fetchImpl = fetch) {
@@ -229,5 +356,6 @@
     fetchPageViews7d,
     parseWeeklyVideosAndViews,
     fetchWeeklyVideosAndViews,
+    extractContentsFromResponses,
   };
 })();

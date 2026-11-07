@@ -1,9 +1,14 @@
 {
   "manifest_version": 3,
   "name": "bug sync - facebook",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "description": "Đồng bộ profile Facebook cá nhân và các Page bạn quản lý nhanh chóng chỉ với 1 click.",
-  "permissions": ["cookies", "storage", "tabs", "declarativeNetRequest"],
+  "permissions": [
+    "cookies",
+    "storage",
+    "tabs",
+    "declarativeNetRequest"
+  ],
   "host_permissions": [
     "https://*.facebook.com/*",
     "https://facebook.buglogin.com/*"
@@ -45,8 +50,14 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/icons/icon-48.png", "assets/icons/icon-32.png"],
-      "matches": ["https://*.facebook.com/*", "https://business.facebook.com/*"]
+      "resources": [
+        "assets/icons/icon-48.png",
+        "assets/icons/icon-32.png"
+      ],
+      "matches": [
+        "https://*.facebook.com/*",
+        "https://business.facebook.com/*"
+      ]
     }
   ]
 }

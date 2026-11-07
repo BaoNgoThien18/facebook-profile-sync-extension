@@ -237,7 +237,7 @@ async function runManualSync() {
   const statsProfileId = account?.cUserId || account?.userId || profileId;
   const scrapedCount = await scrapeContentSummaries(pages, statsProfileId);
   if (!scrapedCount && pages.length && account?.dtsg && typeof FacebookBusinessInsightsApi !== "undefined" && FacebookBusinessInsightsApi.fetchWeeklyVideosAndViews) {
-    await setSyncStatus("checking", `Đang lấy video và views 7 ngày qua cho ${pages.length} Page...`, { profileId: statsProfileId });
+    await setSyncStatus("checking", `Đang lấy video và views 28 ngày qua cho ${pages.length} Page...`, { profileId: statsProfileId });
     for (const page of pages) {
       const pageId = page.id || page.pageId;
       if (!pageId) continue;
@@ -246,12 +246,18 @@ async function runManualSync() {
           fb_dtsg: account.dtsg,
           lsd: account.lsd || "cB4dmWcFc9EdW3lIItBEZs",
         });
-        if (stats?.hasData || Number.isSafeInteger(stats?.views_7d) || Number.isSafeInteger(stats?.video_count_7d)) {
-          page.views_7d = Number.isSafeInteger(stats.views_7d) ? stats.views_7d : 0;
-          page.video_count_7d = Number.isSafeInteger(stats.video_count_7d) ? stats.video_count_7d : 0;
+        if (stats?.hasData || Number.isSafeInteger(stats?.views_7d) || Number.isSafeInteger(stats?.video_count_7d) || Array.isArray(stats?.contents)) {
+          page.views_7d = Number.isSafeInteger(stats?.views_7d) ? stats.views_7d : 0;
+          page.video_count_7d = Number.isSafeInteger(stats?.video_count_7d) ? stats.video_count_7d : (stats?.contents?.length || 0);
+          if (Array.isArray(stats?.contents) && stats.contents.length > 0) {
+            page.insights = {
+              ...(page.insights || {}),
+              contents: stats.contents,
+            };
+          }
         }
       } catch (statErr) {
-        console.warn(`[Background] Không lấy được stats video 7d cho page ${pageId}:`, statErr);
+        console.warn(`[Background] Không lấy được stats video 28d cho page ${pageId}:`, statErr);
       }
     }
   }

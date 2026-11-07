@@ -633,3 +633,29 @@ test('FacebookBusinessInsightsApi parses actual request/contents response correc
   assert.equal(result.video_count_7d, 11);
   assert.equal(result.views_7d, 465);
 });
+
+test('FacebookBusinessInsightsApi parses request/list-content stream and extracts contents list', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const filePath = path.resolve(__dirname, '../request/list-content');
+  if (!fs.existsSync(filePath)) return;
+  const content = fs.readFileSync(filePath, 'utf8');
+  const startJson = content.indexOf('{"data":');
+  if (startJson === -1) return;
+  const rawPayload = content.slice(startJson);
+
+  const chunks = FacebookBusinessInsightsApi.parseResponse(rawPayload);
+  assert.ok(chunks.length > 0);
+
+  const stats = FacebookBusinessInsightsApi.parseWeeklyVideosAndViews(chunks.slice(0, 1));
+  assert.equal(stats.video_count_7d, 8);
+  assert.equal(stats.views_7d, 591349);
+
+  const contents = FacebookBusinessInsightsApi.extractContentsFromResponses(chunks, '61595502776441');
+  assert.equal(contents.length, 8);
+  assert.equal(contents[0].content_id, '1147682911067071');
+  assert.equal(contents[0].views, 281);
+  assert.equal(contents[1].views, 18495);
+  assert.ok(contents[2].links.length > 0);
+  assert.ok(contents[0].content_url.includes('facebook.com/61595502776441/videos/1147682911067071'));
+});
