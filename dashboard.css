@@ -48,8 +48,8 @@ button { font-family: inherit; }
 .sidebar-note strong, .sidebar-note small { display: block; }
 .sidebar-note strong { font-size: 11px; }
 .sidebar-note small { font-size: 10px; color: var(--muted); margin-top: 3px; }
-.version-line { display: flex; justify-content: space-between; padding: 18px 4px 0; font-size: 9px; letter-spacing: .8px; color: #ad9da2; font-weight: 700; }
-.version-line span { letter-spacing: 0; font-weight: 500; }
+.version-line { display: flex; align-items: center; justify-content: space-between; padding: 14px 10px; margin-top: 14px; font-size: 13px; font-weight: 700; color: #1e293b; background: rgba(225, 29, 72, 0.08); border: 1.5px solid rgba(225, 29, 72, 0.2); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.version-line span { font-size: 13px; font-weight: 800; color: #e11d48; background: #fff; padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(225, 29, 72, 0.25); }
 .main-area { max-width: 1180px; width: 100%; margin: 0 auto; padding: 0 50px 36px; }
 .topbar { height: 91px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
 .eyebrow, .field-label { font-size: 9px; letter-spacing: 1.05px; font-weight: 700; color: #a48f96; }

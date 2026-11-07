@@ -128,10 +128,12 @@
       </svg>
     `;
 
+    const version = chrome?.runtime?.getManifest?.()?.version ? `v${chrome.runtime.getManifest().version}` : "";
+
     btn.innerHTML = `
       ${logoImg}
       ${spinSvg}
-      <span id="bug-sync-btn-text">Đồng bộ</span>
+      <span id="bug-sync-btn-text">Đồng bộ${version ? ` <small style="font-size:10px;font-weight:700;opacity:0.85;background:rgba(255,255,255,0.22);padding:2px 6px;border-radius:6px;margin-left:4px;">${version}</small>` : ""}</span>
     `;
 
     // Sub-link "Xem chi tiết"
@@ -248,7 +250,7 @@
         }
         btn.style.opacity = "1";
         btn.style.pointerEvents = "auto";
-        textSpan.textContent = "Đồng bộ";
+        textSpan.innerHTML = `Đồng bộ${version ? ` <small style="font-size:10px;font-weight:700;opacity:0.85;background:rgba(255,255,255,0.22);padding:2px 6px;border-radius:6px;margin-left:4px;">${version}</small>` : ""}`;
 
         if (res?.success) {
           statusMsg.textContent = `✓ Đã đồng bộ ${res.pageCount || 0} Page thành công!`;
