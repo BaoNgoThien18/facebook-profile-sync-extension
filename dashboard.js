@@ -375,6 +375,13 @@
     if (changeInfo.url || changeInfo.status === "complete") refresh();
   });
   chrome?.tabs?.onRemoved?.addListener(() => refresh());
+  try {
+    const manifest = chrome?.runtime?.getManifest?.();
+    if (manifest?.version) {
+      const vEl = $("#app-version");
+      if (vEl) vEl.textContent = `v${manifest.version}`;
+    }
+  } catch (_) {}
   refresh();
   loadSettings();
 })();
